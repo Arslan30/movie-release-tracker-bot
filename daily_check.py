@@ -1,15 +1,12 @@
 """
 Daily notification runner.
-
-Run via cron or systemd timer:
-    0 9 * * * /path/to/venv/bin/python /path/to/daily_check.py
-
-Or run manually:
-    python daily_check.py
 """
 import asyncio
 import logging
 
+from telegram import Bot
+
+from config import BOT_TOKEN
 from database import init_db
 from release_checker import check_movies
 from tv_checker import check_tv_shows
@@ -24,8 +21,12 @@ logger = logging.getLogger(__name__)
 async def main() -> None:
     logger.info("=== Daily check started ===")
     init_db()
-    await check_movies()
-    await check_tv_shows()
+    bot = Bot(token=BOT_TOKEN)
+    try:
+        await check_movies(bot)
+        await check_tv_shows(bot)
+    finally:
+        await bot.close()
     logger.info("=== Daily check complete ===")
 
 
