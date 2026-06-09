@@ -2,12 +2,20 @@ import logging
 import time
 from datetime import date
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    Update,
+)
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 from config import BOT_TOKEN
@@ -488,6 +496,63 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.answer("Already tracked.", show_alert=False)
 
 
+
+
+# --------------------------------------------------
+# Plain Text / Keyboard Button Handler
+# --------------------------------------------------
+
+_KEYBOARD_COMMANDS = {
+    "🎬 Search Movie": "_await_movie_search",
+    "📺 Search TV Show": "_await_tv_search",
+    "🎬 My Movies": cmd_mymovies,
+    "📺 My Shows": cmd_myshows,
+    "⏰ Coming Soon": cmd_comingsoon,
+    "📅 Upcoming Episodes": cmd_upcomingshows,
+    "🎬 Today": cmd_today,
+    "🔔 Subscribe Movies": cmd_subscribe_movies,
+}
+
+_AWAITING_MOVIE_SEARCH: set[int] = set()
+_AWAITING_TV_SEARCH: set[int] = set()
+
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    text = update.message.text.strip()
+
+    # Keyboard button shortcuts
+    if text in _KEYBOARD_COMMANDS:
+        action = _KEYBOARD_COMMANDS[text]
+        if action == "_await_movie_search":
+            _AWAITING_MOVIE_SEARCH.add(user_id)
+            _AWAITING_TV_SEARCH.discard(user_id)
+            await update.message.reply_text("Type the movie title:")
+        elif action == "_await_tv_search":
+            _AWAITING_TV_SEARCH.add(user_id)
+            _AWAITING_MOVIE_SEARCH.discard(user_id)
+            await update.message.reply_text("Type the TV show title:")
+        else:
+            await action(update, context)
+        return
+
+    # Awaiting search input after keyboard button
+    if user_id in _AWAITING_MOVIE_SEARCH:
+        _AWAITING_MOVIE_SEARCH.discard(user_id)
+        context.args = text.split()
+        await cmd_search(update, context)
+        return
+
+    if user_id in _AWAITING_TV_SEARCH:
+        _AWAITING_TV_SEARCH.discard(user_id)
+        context.args = text.split()
+        await cmd_searchtv(update, context)
+        return
+
+    # Default: treat any plain text as a movie search
+    context.args = text.split()
+    await cmd_search(update, context)
+
 # --------------------------------------------------
 # Entry Point
 # --------------------------------------------------
@@ -517,6 +582,8 @@ def main() -> None:
     ]
     for name, handler in commands:
         app.add_handler(CommandHandler(name, handler))
+
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     logger.info("Bot started.")
     app.run_polling()
