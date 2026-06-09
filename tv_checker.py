@@ -1,140 +1,77 @@
-import requests
-
+import logging
 from datetime import date
 
-from config import BOT_TOKEN
+from telegram import Bot
+from telegram.error import TelegramError
 
+from config import BOT_TOKEN
 from database import (
     get_all_tracked_tv,
-    notification_sent_tv,
     mark_notification_sent_tv,
+    notification_sent_tv,
 )
+from tmdb_client import get_tv_details
 
-from tmdb_client import (
-    get_tv_details,
-)
+logger = logging.getLogger(__name__)
 
-today = date.today().strftime(
-    "%Y-%m-%d"
-)
+TODAY = date.today().isoformat()
 
 
-def send_message(
-    user_id,
-    text
-):
-
-    response = requests.post(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        json={
-            "chat_id": user_id,
-            "text": text
-        },
-        timeout=20
-    )
-
-    response.raise_for_status()
+async def _notify(bot: Bot, user_id: int, text: str) -> None:
+    try:
+        await bot.send_message(chat_id=user_id, text=text)
+    except TelegramError as e:
+        logger.warning("Failed to notify user_id=%s: %s", user_id, e)
 
 
-def check_tv_shows():
-
+async def check_tv_shows() -> None:
+    bot = Bot(token=BOT_TOKEN)
     shows = get_all_tracked_tv()
+    logger.info("Checking %d tracked TV records...", len(shows))
 
-    print(
-        f"Checking {len(shows)} shows..."
-    )
-
-    for (
-        user_id,
-        tv_id,
-        tv_title
-    ) in shows:
-
+    for user_id, tv_id, tv_title in shows:
         try:
+            details = get_tv_details(tv_id)
+            next_ep = details.get("next_episode_to_air")
 
-            details = get_tv_details(
-                tv_id
-            )
-
-            next_episode = details.get(
-                "next_episode_to_air"
-            )
-
-            if not next_episode:
-
-                print(
-                    f"{tv_title} -> "
-                    f"No upcoming episode"
-                )
-
+            if not next_ep:
+                logger.debug("%s -> no upcoming episode", tv_title)
                 continue
 
-            air_date = next_episode.get(
-                "air_date"
+            air_date = next_ep.get("air_date", "")
+            season = next_ep.get("season_number")
+            episode = next_ep.get("episode_number")
+
+            logger.debug("%s -> S%sE%s (%s)", tv_title, season, episode, air_date)
+
+            if air_date != TODAY:
+                continue
+            if notification_sent_tv(user_id, tv_id, season, episode):
+                continue
+
+            message = (
+                f"📺 {tv_title}\n\n"
+                f"New episode out today!\n"
+                f"Season {season}, Episode {episode}\n"
+                f"📅 {air_date}"
             )
+            await _notify(bot, user_id, message)
+            mark_notification_sent_tv(user_id, tv_id, season, episode)
+            logger.info("Notified user=%s: %s S%sE%s", user_id, tv_title, season, episode)
 
-            season = next_episode.get(
-                "season_number"
-            )
+        except Exception:
+            logger.exception("Error checking tv_id=%s (%s)", tv_id, tv_title)
 
-            episode = next_episode.get(
-                "episode_number"
-            )
-
-            print(
-                f"{tv_title} -> "
-                f"S{season}E{episode} "
-                f"({air_date})"
-            )
-
-            if (
-                air_date == today
-                and not notification_sent_tv(
-                    user_id,
-                    tv_id,
-                    season,
-                    episode
-                )
-            ):
-
-                send_message(
-                    user_id,
-                    (
-                        f"📺 {tv_title}\n\n"
-                        f"New episode released today!\n\n"
-                        f"Season {season}\n"
-                        f"Episode {episode}\n"
-                        f"📅 {air_date}"
-                    )
-                )
-
-                mark_notification_sent_tv(
-                    user_id,
-                    tv_id,
-                    season,
-                    episode
-                )
-
-                print(
-                    f"Notification sent: "
-                    f"{tv_title}"
-                )
-
-        except Exception as e:
-
-            print(
-                f"Error checking "
-                f"{tv_title}: {e}"
-            )
+    await bot.close()
 
 
 if __name__ == "__main__":
+    import asyncio
 
-    print(
-        f"TV Checker Started "
-        f"({today})"
+    logging.basicConfig(
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        level=logging.INFO,
     )
-
-    check_tv_shows()
-
-    print("Done.")
+    logger.info("TV Checker started (%s)", TODAY)
+    asyncio.run(check_tv_shows())
+    logger.info("Done.")

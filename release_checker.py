@@ -1,155 +1,67 @@
-import requests
-
+import logging
 from datetime import date
 
+from telegram import Bot
+from telegram.error import TelegramError
+
 from config import BOT_TOKEN
+from database import get_all_tracked_movies, mark_notification_sent, notification_sent
+from tmdb_client import get_release_events
 
-from database import (
-    get_all_tracked_movies,
-    notification_sent,
-    mark_notification_sent,
-)
+logger = logging.getLogger(__name__)
 
-from tmdb_client import (
-    get_release_events,
-)
+TODAY = date.today().isoformat()
 
-today = date.today().strftime(
-    "%Y-%m-%d"
-)
+_EVENT_LABELS = {
+    "theatrical": "🎭 Theatrical release today!",
+    "digital": "💻 Digital release today!",
+    "physical": "💿 Physical/Blu-ray release today!",
+}
 
 
-def send_message(
-    user_id,
-    text
-):
-
-    response = requests.post(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        json={
-            "chat_id": user_id,
-            "text": text,
-        },
-        timeout=20,
-    )
-
-    response.raise_for_status()
+async def _notify(bot: Bot, user_id: int, text: str) -> None:
+    try:
+        await bot.send_message(chat_id=user_id, text=text)
+    except TelegramError as e:
+        logger.warning("Failed to notify user_id=%s: %s", user_id, e)
 
 
-def check_movies():
-
+async def check_movies() -> None:
+    bot = Bot(token=BOT_TOKEN)
     movies = get_all_tracked_movies()
+    logger.info("Checking %d tracked movie records...", len(movies))
 
-    print(
-        f"Checking {len(movies)} tracked movies..."
-    )
-
-    for (
-        user_id,
-        movie_id,
-        movie_title,
-    ) in movies:
-
+    for user_id, movie_id, movie_title in movies:
         try:
+            events = get_release_events(movie_id)
+            logger.debug("%s -> %s", movie_title, events)
 
-            events = get_release_events(
-                movie_id
-            )
+            for event_type, event_date in events.items():
+                if event_date != TODAY:
+                    continue
+                if notification_sent(user_id, movie_id, event_type):
+                    continue
 
-            print(
-                f"{movie_title} -> "
-                f"{events}"
-            )
+                label = _EVENT_LABELS.get(event_type, f"{event_type} release today!")
+                message = f"🎬 {movie_title}\n\n{label}\n📅 {event_date}"
 
-            for (
-                event_type,
-                event_date,
-            ) in events.items():
+                await _notify(bot, user_id, message)
+                mark_notification_sent(user_id, movie_id, event_type)
+                logger.info("Notified user=%s: %s (%s)", user_id, movie_title, event_type)
 
-                if (
-                    event_date == today
-                    and not notification_sent(
-                        user_id,
-                        movie_id,
-                        event_type,
-                    )
-                ):
+        except Exception:
+            logger.exception("Error checking movie_id=%s (%s)", movie_id, movie_title)
 
-                    if (
-                        event_type
-                        == "theatrical"
-                    ):
-
-                        message = (
-                            f"🎬 {movie_title}\n\n"
-                            f"🎭 Theatrical release today!\n"
-                            f"📅 {event_date}"
-                        )
-
-                    elif (
-                        event_type
-                        == "digital"
-                    ):
-
-                        message = (
-                            f"🎬 {movie_title}\n\n"
-                            f"💻 Digital release today!\n"
-                            f"📅 {event_date}"
-                        )
-
-                    elif (
-                        event_type
-                        == "physical"
-                    ):
-
-                        message = (
-                            f"🎬 {movie_title}\n\n"
-                            f"💿 Physical/Blu-ray "
-                            f"release today!\n"
-                            f"📅 {event_date}"
-                        )
-
-                    else:
-
-                        message = (
-                            f"🎬 {movie_title}\n\n"
-                            f"{event_type} "
-                            f"release today!\n"
-                            f"📅 {event_date}"
-                        )
-
-                    send_message(
-                        user_id,
-                        message
-                    )
-
-                    mark_notification_sent(
-                        user_id,
-                        movie_id,
-                        event_type,
-                    )
-
-                    print(
-                        f"Notification sent: "
-                        f"{movie_title} "
-                        f"({event_type})"
-                    )
-
-        except Exception as e:
-
-            print(
-                f"Error checking "
-                f"{movie_title}: {e}"
-            )
+    await bot.close()
 
 
 if __name__ == "__main__":
+    import asyncio
 
-    print(
-        f"Release Checker Started "
-        f"({today})"
+    logging.basicConfig(
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        level=logging.INFO,
     )
-
-    check_movies()
-
-    print("Done.")
+    logger.info("Release Checker started (%s)", TODAY)
+    asyncio.run(check_movies())
+    logger.info("Done.")

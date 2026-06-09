@@ -1,26 +1,31 @@
-from release_checker import (
-    check_movies
-)
+"""
+Daily notification runner.
 
-from tv_checker import (
-    check_tv_shows
+Run via cron or systemd timer:
+    0 9 * * * /path/to/venv/bin/python /path/to/daily_check.py
+
+Or run manually:
+    python daily_check.py
+"""
+import asyncio
+import logging
+
+from release_checker import check_movies
+from tv_checker import check_tv_shows
+
+logging.basicConfig(
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    level=logging.INFO,
 )
+logger = logging.getLogger(__name__)
+
+
+async def main() -> None:
+    logger.info("=== Daily check started ===")
+    await check_movies()
+    await check_tv_shows()
+    logger.info("=== Daily check complete ===")
 
 
 if __name__ == "__main__":
-
-    print(
-        "Running Movie Checks..."
-    )
-
-    check_movies()
-
-    print(
-        "\nRunning TV Checks..."
-    )
-
-    check_tv_shows()
-
-    print(
-        "\nAll checks completed."
-    )
+    asyncio.run(main())

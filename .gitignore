@@ -5,3 +5,6 @@ __pycache__/
 .vscode/
 .idea/
 *.log
+*.db
+*.sqlite
+*.sqlite3
