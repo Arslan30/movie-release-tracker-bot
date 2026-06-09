@@ -21,12 +21,9 @@ logger = logging.getLogger(__name__)
 async def main() -> None:
     logger.info("=== Daily check started ===")
     init_db()
-    bot = Bot(token=BOT_TOKEN)
-    try:
+    async with Bot(token=BOT_TOKEN) as bot:
         await check_movies(bot)
         await check_tv_shows(bot)
-    finally:
-        await bot.close()
     logger.info("=== Daily check complete ===")
 
 
