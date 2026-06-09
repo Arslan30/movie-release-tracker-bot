@@ -26,8 +26,7 @@ async def _notify(bot: Bot, user_id: int, text: str) -> None:
         logger.warning("Failed to notify user_id=%s: %s", user_id, e)
 
 
-async def check_movies() -> None:
-    bot = Bot(token=BOT_TOKEN)
+async def check_movies(bot: Bot) -> None:
     movies = get_all_tracked_movies()
     logger.info("Checking %d tracked movie records...", len(movies))
 
@@ -52,16 +51,21 @@ async def check_movies() -> None:
         except Exception:
             logger.exception("Error checking movie_id=%s (%s)", movie_id, movie_title)
 
-    await bot.close()
-
 
 if __name__ == "__main__":
     import asyncio
+
+    async def _main():
+        bot = Bot(token=BOT_TOKEN)
+        try:
+            await check_movies(bot)
+        finally:
+            await bot.close()
 
     logging.basicConfig(
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         level=logging.INFO,
     )
     logger.info("Release Checker started (%s)", TODAY)
-    asyncio.run(check_movies())
+    asyncio.run(_main())
     logger.info("Done.")

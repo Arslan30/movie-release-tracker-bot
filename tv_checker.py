@@ -24,8 +24,7 @@ async def _notify(bot: Bot, user_id: int, text: str) -> None:
         logger.warning("Failed to notify user_id=%s: %s", user_id, e)
 
 
-async def check_tv_shows() -> None:
-    bot = Bot(token=BOT_TOKEN)
+async def check_tv_shows(bot: Bot) -> None:
     shows = get_all_tracked_tv()
     logger.info("Checking %d tracked TV records...", len(shows))
 
@@ -62,16 +61,21 @@ async def check_tv_shows() -> None:
         except Exception:
             logger.exception("Error checking tv_id=%s (%s)", tv_id, tv_title)
 
-    await bot.close()
-
 
 if __name__ == "__main__":
     import asyncio
+
+    async def _main():
+        bot = Bot(token=BOT_TOKEN)
+        try:
+            await check_tv_shows(bot)
+        finally:
+            await bot.close()
 
     logging.basicConfig(
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         level=logging.INFO,
     )
     logger.info("TV Checker started (%s)", TODAY)
-    asyncio.run(check_tv_shows())
+    asyncio.run(_main())
     logger.info("Done.")
